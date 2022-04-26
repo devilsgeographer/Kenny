@@ -1,0 +1,477 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <title>Will Kenny Survive the Storm?</title>
+    <style>
+      html,
+      body,
+      #viewDiv {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        width: 100%;
+      }
+
+      .esri-time-slider {
+        width: 100%;
+      }
+    </style>
+
+    <link
+      rel="stylesheet"
+      href="https://js.arcgis.com/4.22/esri/themes/light/main.css"
+    />
+    <script src="https://js.arcgis.com/4.22/"></script>
+
+    <script>
+      var esriRequest, view;
+
+      var mapGraphicsMap, featureLayer;
+
+      var xyToLngLat, geodesicUtils, point, jsonUtils, geometryEngine;
+
+      var searchFeature, searchExtent;
+      require([
+        "esri/config",
+        "esri/Map",
+        "esri/views/MapView",
+        "esri/layers/FeatureLayer",
+        "esri/layers/GeoJSONLayer",
+        "esri/layers/MapImageLayer",
+        "esri/core/promiseUtils",
+        "esri/Graphic",
+        "esri/geometry/Point",
+        "esri/request",
+        "esri/TimeExtent",
+        "esri/widgets/TimeSlider",
+        "esri/layers/support/LabelClass",
+        "esri/geometry/support/webMercatorUtils",
+        "esri/geometry/support/geodesicUtils",
+        "esri/geometry/support/jsonUtils",
+        "esri/geometry/geometryEngine",
+      ], (
+        esriConfig,
+        Map,
+        MapView,
+        FeatureLayer,
+        GeoJsonLayer,
+        MapImageLayer,
+        promiseUtils,
+        Graphic,
+        Point,
+        Request,
+        TimeExtent,
+        TimeSlider,
+        LabelClass,
+        WebMercatorUtils,
+        GeodesicUtils,
+        JSONUtils,
+        GeometryEngine
+      ) => {
+        webMercatorUtils = WebMercatorUtils;
+        geodesicUtils = GeodesicUtils;
+        esriRequest = Request;
+        point = Point;
+        jsonUtils = JSONUtils;
+        geometryEngine = GeometryEngine;
+        esriConfig.request.interceptors.push({
+          // set the `urls` property to the URL of the FeatureLayer so that this
+          // interceptor only applies to requests made to the FeatureLayer URL
+          urls: ["http://127.0.0.1:8080/blizzard.json"],
+          // urls: ["https://idpgis.ncep.noaa.gov/arcgis/rest/services/NWS_Forecasts_Guidance_Warnings/watch_warn_adv/MapServer/1/query?where=prod_type%3D%27Blizzard+Warning%27&outFields=prod_type%2C+phenom&returnGeometry=true&featureEncoding=esriDefault&f=geojson"],
+          // use the BeforeInterceptorCallback to check if the query of the
+          // FeatureLayer has a maxAllowableOffset property set.
+          // if so, then set the maxAllowableOffset to 0
+          before: function (params) {
+            // if (params.requestOptions.query.maxAllowableOffset) {
+            //   params.requestOptions.query.maxAllowableOffset = 0;
+            // }
+            // params.requestOptions.headers = params.requestOptions.headers || {};
+            // params.requestOptions.headers.Accept = "text";
+          },
+          // use the AfterInterceptorCallback to check if `ssl` is set to 'true'
+          // on the response to the request, if it's set to 'false', change
+          // the value to 'true' before returning the response
+          after: function (response) {
+            if (!response.ssl) {
+              response.ssl = true;
+            }
+          },
+        });
+
+        view = new MapView({
+          map: new Map({
+            basemap: "gray-vector",
+          }),
+          container: "viewDiv",
+
+          popup: {
+            dockEnabled: true,
+            dockOptions: {
+              position: "top-right",
+              breakpoint: false,
+            },
+          },
+        });
+
+        view
+          .when()
+          .then(createNWSLayer)
+          .then(createLayer)
+          .catch((e) => {
+            console.error("Creating FeatureLayer", e);
+          });
+
+        //  Creates a client-side FeatureLayer from an array of graphics
+        function createLayer() {
+          // const labelClass = new LabelClass({
+          //   labelExpressionInfo: { expression: "$feature.NAME" },
+          //   symbol: {
+          //     type: "text", // autocasts as new TextSymbol()
+          //     color: "black",
+          //     haloSize: 1,
+          //     haloColor: "white",
+          //   },
+          // });
+
+          featureLayer = new FeatureLayer({
+            source: [],
+            //labelingInfo: [labelClass],
+            spatialReference: { wkid: 4326 },
+            objectIdField: "OBJECTID",
+            geometryType: "point",
+            fields: [
+              {
+                name: "OBJECTID",
+                type: "oid",
+              },
+              {
+                name: "azimuth",
+                type: "double",
+              },
+              {
+                name: "containerId",
+                type: "string",
+              },
+              {
+                name: "cold",
+                type: "small-integer",
+              },
+              {
+                name: "startTime",
+                type: "date",
+              },
+              { name: "displaySize", type: "long" },
+            ],
+            popupTemplate: {
+              title: "Kenny id: {containerId}",
+              content: "is cold: {cold}",
+            },
+            renderer: {
+              // type: "simple",
+              // symbol: {
+              //   type: "picture-marker", // autocasts as new SimpleMarkerSymbol()
+              //   url: "kenny.svg",
+              //   width: "28px", // pixels
+              //   height: "28px", // pixels
+              // },
+              type: "unique-value", // autocasts as new UniqueValueRenderer()
+              field: "cold",
+              defaultSymbol: {
+                type: "picture-marker", // autocasts as new SimpleMarkerSymbol()
+                url: "ColdKenny.svg",
+                width: "28px", // pixels
+                height: "28px", // pixels
+              },
+              uniqueValueInfos: [
+                {
+                  // All features with value of "North" will be blue
+                  value: 0,
+                  symbol: {
+                    type: "picture-marker", // autocasts as new SimpleMarkerSymbol()
+                    url: "Kenny.svg",
+                    width: "28px", // pixels
+                    height: "28px", // pixels
+                  },
+                },
+                {
+                  // All features with value of "East" will be green
+                  value: 1,
+                  symbol: {
+                    type: "picture-marker", // autocasts as new SimpleMarkerSymbol()
+                    url: "ColdKenny.svg",
+                    width: "28px", // pixels
+                    height: "28px", // pixels
+                  },
+                },
+              ],
+            },
+          });
+          view.map.add(featureLayer);
+          return featureLayer;
+        }
+        function createNWSLayer() {
+          // const labelClass = new LabelClass({
+          //   labelExpressionInfo: { expression: "$feature.NAME" },
+          //   symbol: {
+          //     type: "text", // autocasts as new TextSymbol()
+          //     color: "black",
+          //     haloSize: 1,
+          //     haloColor: "white",
+          //   },
+          // });
+
+          const mapLayer = new GeoJsonLayer({
+            // url: "https://idpgis.ncep.noaa.gov/arcgis/rest/services/NWS_Forecasts_Guidance_Warnings/watch_warn_adv/MapServer/1/query?where=prod_type%3D%27Blizzard+Warning%27&outFields=prod_type%2C+phenom&returnGeometry=true&featureEncoding=esriDefault&f=geojson",
+            url: "blizzard.json",
+            renderer: {
+              type: "simple", // autocasts as new SimpleRenderer()
+              symbol: { type: "simple-fill", color: [0, 0, 255] }, // autocasts as new SimpleFillSymbol()
+              // visualVariables: [
+              //   {
+              //     type: "color",
+              //     field: "POPULATION",
+              //     normalizationField: "SQ_KM",
+              //     // features with 30 ppl/sq km or below are assigned the first color
+              //     stops: [
+              //       { value: 100, color: "#FFFCD4" },
+              //       { value: 500, color: "#0D2644" },
+              //     ],
+              //   },
+              // ],
+            },
+            spatialReference: { wkid: 4326 },
+            fields: [
+              {
+                name: "objectid",
+                type: "oid",
+              },
+              {
+                name: "prod_type",
+                type: "string",
+              },
+              {
+                name: "phenom",
+                type: "string",
+              },
+            ],
+          });
+          view.map.add(mapLayer);
+          mapLayer.queryFeatures().then((result) => {
+            searchFeature = geometryEngine.union(
+              result.features.map((f) => f.geometry)
+            );
+            searchExtent = searchFeature.extent;
+          });
+          // mapLayer.queryExtent().then(result => {
+          //     searchExtent = result.extent;
+          // });
+          return mapLayer;
+        }
+      });
+
+      function doThings() {
+        const colorVisVar = {
+          type: "color",
+          field: "OBJECTID",
+          // normalizationField: "SQ_KM",
+          stops: [
+            { value: 1, color: "#f54242" },
+            {
+              value: Number(document.getElementById("quantity").value),
+              color: "#42a7f5",
+            },
+          ],
+        };
+
+        const sizeVisualVariable = {
+          type: "size",
+          field: "cold",
+          minDataValue: 0,
+          maxDataValue: 1,
+          minSize: 25,
+          maxSize: 50,
+        };
+
+        const rotationVar = {
+          type: "rotation",
+          field: "azimuth",
+          rotationType: "geographic",
+        };
+
+        featureLayer.renderer.visualVariables = [
+          rotationVar,
+          // colorVisVar,
+          sizeVisualVariable,
+        ];
+
+        mapGraphicsMap = {};
+
+        var numGraphics = 1;
+        var iterator = [
+          ...new Array(
+            Number(document.getElementById("quantity").value)
+          ).keys(),
+        ];
+
+        var minPair = webMercatorUtils.xyToLngLat(
+          view.extent.xmin,
+          view.extent.ymin
+        );
+        var maxPair = webMercatorUtils.xyToLngLat(
+          view.extent.xmax,
+          view.extent.ymax
+        );
+
+        iterator.forEach((i) => {
+          var uuid = uuidv4();
+
+          var lat = generateRandomFloatInRange(minPair[1], maxPair[1]);
+          var lng = generateRandomFloatInRange(minPair[0], maxPair[0]);
+
+          var graphic = {
+            attributes: {
+              OBJECTID: i,
+              azimuth: 0,
+              cold: 0,
+              startTime: new Date().getTime(),
+              containerId: uuid,
+              displaySize: randomIntFromInterval(0, 60),
+              isIncreasingLat: randomIntFromInterval(0, 1),
+              isIncreasingLng: randomIntFromInterval(0, 1),
+              increaseLatFactor: generateRandomFloatInRange(1, 1000) / 100000,
+              increaseLngFactor: generateRandomFloatInRange(1, 1000) / 100000,
+              // endTime: new Date(feature._id.TS.$date).getTime() + 30000,
+            },
+            geometry: {
+              longitude: lng,
+              latitude: lat,
+              type: "point",
+            },
+          };
+
+          mapGraphicsMap[uuid] = graphic;
+        });
+
+        let mapGraphicsListForMap = Object.values(mapGraphicsMap);
+        featureLayer
+          .applyEdits({ addFeatures: mapGraphicsListForMap })
+          .then((results) => {
+            console.log(results);
+          });
+
+        // let's update!
+        var waddle = false;
+        setInterval(() => {
+          
+          Object.keys(mapGraphicsMap).forEach((containerKey) => {
+            var newLat, newLng;
+            var curItem = { ...mapGraphicsMap[containerKey] };
+
+            if (curItem.attributes.isIncreasingLat) {
+              newLat =
+                curItem.geometry.latitude +
+                curItem.attributes.increaseLatFactor;
+            } else {
+              newLat =
+                curItem.geometry.latitude -
+                curItem.attributes.increaseLatFactor;
+            }
+
+            if (curItem.attributes.isIncreasingLat) {
+              newLng =
+                curItem.geometry.longitude +
+                curItem.attributes.increaseLngFactor;
+            } else {
+              newLng =
+                curItem.geometry.longitude -
+                curItem.attributes.increaseLngFactor;
+            }
+            const newPoint = new point({
+              x: newLng,
+              y: newLat,
+            });
+            const { distance, reverseAzimuth } = geodesicUtils.geodesicDistance(
+              newPoint,
+              new point({
+                x: curItem.geometry.longitude,
+                y: curItem.geometry.latitude,
+              }),
+
+              "meters"
+            );
+
+            const updateItem = mapGraphicsMap[containerKey];
+            if (!reverseAzimuth) {
+              reverseAzimuth = 0;
+            }
+            const finalAzimuth = waddle? reverseAzimuth - 1 : reverseAzimuth + 1;
+            updateItem.attributes.azimuth = finalAzimuth;
+            updateItem.geometry.latitude = newLat;
+            updateItem.geometry.longitude = newLng;
+
+            if (geometryEngine.intersects(searchExtent, newPoint)) {
+              if (geometryEngine.intersects(searchFeature, newPoint)) {
+                updateItem.attributes.cold = 1;
+              } else {
+                updateItem.attributes.cold = 0;
+              }
+            } else {
+              updateItem.attributes.cold = 0;
+            }
+
+            mapGraphicsMap[containerKey] = updateItem;
+          });
+
+          mapGraphicsListForMap = Object.values(mapGraphicsMap);
+          featureLayer
+            .applyEdits({ updateFeatures: mapGraphicsListForMap })
+            .then((results) => {
+              console.log(results);
+            });
+
+          //  // add + delete, vs update:
+          //   featureLayer
+          //     .applyEdits({ addFeatures: mapGraphicsListForMap, deleteFeatures: mapGraphicsListForMap })
+          //     .then((results) => {
+          //       console.log(results);
+          //     });
+          waddle = !waddle;
+
+        }, Number(document.getElementById("interval").value));
+      }
+
+      function uuidv4() {
+        return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
+          (
+            c ^
+            (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
+          ).toString(16)
+        );
+      }
+
+      function randomIntFromInterval(min, max) {
+        // min and max included
+        return Math.floor(Math.random() * (max - min + 1) + min);
+      }
+
+      // Generate a random number between 2.5 and 10.75, including both 2.5 and 10.75
+      function generateRandomFloatInRange(min, max) {
+        return Math.random() * (max - min + 1) + min;
+      }
+    </script>
+  </head>
+
+  <body>
+    <label for="quantity">How Many</label
+    ><input id="quantity" type="text" value="100" />
+    <label for="interval">How Often (ms)</label
+    ><input id="interval" type="text" value="5000" />
+    <input type="button" onclick="doThings()" value="Unleash Kenny" />
+    <div id="viewDiv"></div>
+  </body>
+</html>
